@@ -4,7 +4,7 @@
 
 
 ### Description for the Conveyor Code
-This code assumes that you have connected the infrared sensor to GPIO 4 and the DC motor to GPIO 17 and GPIO 27 using an H-bridge motor driver. 
+This code assumes that you have connected the *infrared sensor* to GPIO 4 and the *DC motor* to GPIO 17 and GPIO 27 using an H-bridge motor driver. 
 
 In this code, we first import the required libraries and set up the GPIO pins for the infrared sensor and DC motor. Then, we define two functions, clockwise() and counterclockwise(), that control the direction of the motor.
 
