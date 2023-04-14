@@ -1,135 +1,202 @@
-import cv2
+import csv
 import numpy as np
-import adafruit_pca9685
-import board
-import busio
+import cv2
 import time
-import math
+import Adafruit_PCA9685
+# Define the servo motor configurations
+servo_min = [150, 150, 150, 150, 150, 150]
+servo_max = [600, 600, 600, 600, 600, 600]
 
-# Initialize the servo controller
-i2c_bus = busio.I2C(board.SCL, board.SDA)
-pca = adafruit_pca9685.PCA9685(i2c_bus)
-pca.frequency = 50
+# Define the PCA9685 servo driver
+pwm = Adafruit_PCA9685.PCA9685()
+pwm.set_pwm_freq(50)
+# Read the CSV file
+csv_file = 'dataset.csv'
+dataset = []
 
-# Define the servo parameters
-servo_min = 150  # Min pulse length out of 4096
-servo_max = 600  # Max pulse length out of 4096
-servo_range = servo_max - servo_min
+with open(csv_file, 'r') as file:
+    reader = csv.reader(file)
+    for row in reader:
+        dataset.append(row)
+# Define the image processing function
+def process_image(image):
+    # Convert the image to grayscale
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-# Define the link lengths of the robotic arm
-l1 = 0.2
-l2 = 0.2
-l3 = 0.15
-l4 = 0.1
+    # Apply a Gaussian blur to the image
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
 
-# Initialize the servo motor objects
-kit = adafruit_pca9685.servo.Servo(pca.channels[0])
-kit_1 = adafruit_pca9685.servo.Servo(pca.channels[1])
-kit_2 = adafruit_pca9685.servo.Servo(pca.channels[2])
-kit_3 = adafruit_pca9685.servo.Servo(pca.channels[3])
-kit_4 = adafruit_pca9685.servo.Servo(pca.channels[4])
-kit_5 = adafruit_pca9685.servo.Servo(pca.channels[5])
+    # Detect the edges in the image using Canny edge detection
+    edges = cv2.Canny(blur, 50, 150)
 
-# Define the colors to be detected
-green_lower = np.array([35, 80, 80])
-green_upper = np.array([65, 255, 255])
-red_lower = np.array([0, 100, 100])
-red_upper = np.array([5, 255, 255])
+    # Find the contours in the image
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-# Start the video capture
-cap = cv2.VideoCapture(0)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    # Iterate through the contours and draw a bounding box around each object
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        cv2.rectangle(image, (x, y), (x+w, y+h), (0, 255, 0), 2)
 
-while True:
-    # Read a frame from the video capture
-    ret, frame = cap.read()
+    # Return the image with the bounding boxes drawn around the objects
+    return image
+# Define the function that maps the position of the object to the servo motor angles
+def map_position_to_angles(x, y):
+    # Calculate the angle for the base servo motor
+    angle1 = np.interp(x, [0, 640], [servo_min[0], servo_max[0]])
 
-    # Flip the frame horizontally for intuitive movement control
-    frame = cv2.flip(frame, 1)
+    # Calculate the angle for the shoulder servo motor
+    angle2 = np.interp(y, [0, 480], [servo_min[1], servo_max[1]])
 
-    # Convert the frame to the HSV color space
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    # Calculate the angle for the elbow servo motor
+    angle3 = np.interp(x, [0, 640], [servo_min[2], servo_max[2]])
 
-    # Threshold the frame to get only the green and red colors
-    mask_green = cv2.inRange(hsv, green_lower, green_upper)
-    mask_red = cv2.inRange(hsv, red_lower, red_upper)
-    mask = mask_green + mask_red
+    # Calculate the angle for the wrist servo motor
+    angle4 = np.interp(y, [0, 480], [servo_min[3], servo_max[3]])
 
-    # Find the contours in the binary image
-    contours, hierarchy = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    # Calculate the angle for the gripper servo motor
+    angle5 = np.interp(x, [0, 640], [servo_min[4], servo_max[4]])
 
-    # Extract the contours of the plastic bottles and tin cans
-    bottle_contours = [contour for contour in contours if cv2.contourArea(contour) > 1000 and cv2.contourArea(contour) < 20000 and len(cv2.approxPolyDP(contour, 0.01 * cv2.arcLength(contour, True), True)) >= 5]
-    tin_contours = [contour for contour in contours if cv2.contourArea(contour) > 1000 and cv2.contourArea(contour) < 20000 and len(cv2.approxPolyDP(contour, 0.01 * cv2.arcLength(contour, True), True)) < 5]
+    # Calculate the angle for the rotation servo motor
+    angle6 = np.interp(y, [0, 480], [servo_min[5], servo_max[5]])
 
-        # Sort the bottle and tin contours based on their positions
-        if len(bottle_contours) > 0:
-            bottle_center = np.mean([cv2.minEnclosingCircle(contour)[0] for contour in bottle_contours], axis=0)
-            bottle_contours = sorted(bottle_contours, key=lambda x: math.sqrt((cv2.minEnclosingCircle(x)[0][0] - bottle_center[0]) ** 2 + (cv2.minEnclosingCircle(x)[0][1] - bottle_center[1]) ** 2))
-        if len(tin_contours) > 0:
-            tin_center = np.mean([cv2.minEnclosingCircle(contour)[0] for contour in tin_contours], axis=0)
-            tin_contours = sorted(tin_contours, key=lambda x: math.sqrt((cv2.minEnclosingCircle(x)[0][0] - tin_center[0]) ** 2 + (cv2.minEnclosingCircle(x)[0][1] - tin_center[1]) ** 2))
+    # Return the angles for the servo motors
+    return angle1, angle2, angle3, angle4, angle5, angle6
 
-        # Control the robotic arm based on the detected objects
-        if len(bottle_contours) > 0:
-            bottle_center = cv2.minEnclosingCircle(bottle_contours[0])[0]
-            x = bottle_center[0] / 640
-            y = bottle_center[1] / 480
-            z = 0.15
-            theta1 = math.atan2(y - l1, x)
-            d = math.sqrt((x ** 2) + ((y - l1) ** 2))
-            a = z - l4
-            b = d - l2
-            c = math.sqrt((a ** 2) + (b ** 2))
-            alpha = math.atan2(a, b)
-            beta = math.acos(((l3 ** 2) - (l2 ** 2) - (c ** 2) - (l4 ** 2)) / (-2 * l2 * c))
-            theta2 = alpha - beta
-            theta3 = math.acos(((c ** 2) - (l3 ** 2) - (l4 ** 2)) / (-2 * l3 * l4))
-            theta4 = math.pi - theta2 - theta3
-            kit.angle = int((theta1 * 180 / math.pi) * servo_range / 180 + servo_min)
-            kit_1.angle = int((theta2 * 180 / math.pi) * servo_range / 180 + servo_min)
-            kit_2.angle = int((theta3 * 180 / math.pi) * servo_range / 180 + servo_min)
-            kit_3.angle = int((theta4 * 180 / math.pi) * servo_range / 180 + servo_min)
-            time.sleep(0.5)
-            kit_4.angle = servo_min
-            time.sleep(0.5)
-            kit_4.angle = servo_max
-            time.sleep(0.5)
-        elif len(tin_contours) > 0:
-            tin_center = cv2.minEnclosingCircle(tin_contours[0])[0]
-            x = tin_center[0] / 640
-            y = tin_center[1] / 480
-            z = 0.15
-            theta1 = math.atan2(y - l1, x)
-            d = math.sqrt((x ** 2) + ((y - l1) ** 2))
-            a = z - l4
-            b = d - l2
-            c = math.sqrt((a ** 2) + (b ** 2))
-            alpha = math.atan2(a, b)
-            beta = math.acos(((l3 ** 2) - (l2 ** 2) - (c ** 2) - (l4 ** 2)) / (-2 * l2 * c))
-            theta2 = alpha - beta
-            theta3 = math.acos(((c ** 2) - (l3 ** 2) - (l4 ** 2)) / (-2 * l3 * l4))
-            theta4 = math.pi - theta2 - theta3
-            kit.angle = int((theta1 * 180 / math.pi) * servo_range / 180 + servo_min)
-            kit_1.angle = int((theta2 * 180 / math.pi) * servo_range / 180 + servo_min)
-            kit_2.angle = int((theta3 * 180 / math.pi) * servo_range / 180 + servo_min)
-            kit_3.angle = int((theta4 * 180 / math.pi) * servo_range / 180 + servo_min)
-            time.sleep(0.5)
-            kit_4.angle = servo_min
-            time.sleep(0.5)
-            kit_4.angle = servo_max
-            time.sleep(0.5)
-        
-        # Display the processed frame
-        cv2.imshow("Frame", frame)
-        
-        # Exit the loop if the 'q' key is pressed
+# Define the main function
+def main():
+    # Set up the camera
+    camera = cv2.VideoCapture(0)
+    time.sleep(2)
+
+    # Set the initial position of the servo motors
+    initial_position = [375, 240, 375, 240, 375, 240]
+    for i in range(6):
+        pwm.set_pwm(i, 0, initial_position[i])
+
+    # Loop through the images from the camera
+    while True:
+        # Read an image from the camera
+        _, image = camera.read()
+
+        # Process the image to detect the objects
+        processed_image = process_image(image)
+
+        # Display the processed image
+        cv2.imshow('Processed Image', processed_image)
+
+        # Wait for a key press to exit the program
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-    # Release the video capture and close all windows
-    cap.release()
+    # Release the camera and close all windows
+    camera.release()
     cv2.destroyAllWindows()
 
+if __name__ == '__main__':
+    main()
 
+
+"""
+
+I DONT KNOW SAAN TO PERO NILAGAY NG CHATGPT. THO FUNCTIONAL YUNG CODE KAHIT WALA TO
+
+# Import the necessary libraries to control the PCA9685 servo driver
+import board
+import busio
+from adafruit_pca9685 import PCA9685
+
+# Initialize the PCA9685 servo driver object
+i2c = busio.I2C(board.SCL, board.SDA)
+pca = PCA9685(i2c)
+pca.frequency = 50
+
+# Define the process_image function
+def process_image(image):
+    # Convert the image to grayscale
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # Threshold the image to separate the foreground from the background
+    _, threshold = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV)
+
+    # Find the contours in the thresholded image
+    contours, _ = cv2.findContours(threshold, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Initialize the positions of the objects
+    object_positions = {'bottle': None, 'can': None}
+
+    # Loop through the contours to detect the objects
+    for contour in contours:
+        # Get the bounding rectangle of the contour
+        x, y, w, h = cv2.boundingRect(contour)
+
+        # Get the aspect ratio of the bounding rectangle
+        aspect_ratio = w / h
+
+        # Determine the type of object based on the aspect ratio
+        if 0.8 < aspect_ratio < 1.2:
+            object_type = 'can'
+        elif 1.8 < aspect_ratio < 2.2:
+            object_type = 'bottle'
+        else:
+            continue
+
+        # Update the position of the object
+        if object_positions[object_type] is None:
+            object_positions[object_type] = (x, y, w, h)
+        elif y < object_positions[object_type][1]:
+            object_positions[object_type] = (x, y, w, h)
+
+    # Control the servo motors based on the positions of the objects
+    if object_positions['can'] is not None:
+        # Control the servo motors to pick up the can
+        x, y, w, h = object_positions['can']
+        angle1, angle2, angle3, angle4, angle5, angle6 = calculate_servo_angles(x, y, w, h)
+        pca.channels[0].duty_cycle = int(angle1 / 360 * 65535)
+        pca.channels[1].duty_cycle = int(angle2 / 360 * 65535)
+        pca.channels[2].duty_cycle = int(angle3 / 360 * 65535)
+        pca.channels[3].duty_cycle = int(angle4 / 360 * 65535)
+        pca.channels[4].duty_cycle = int(angle5 / 360 * 65535)
+        pca.channels[5].duty_cycle = int(angle6 / 360 * 65535)
+        time.sleep(1)
+
+        # Control the servo motors to drop the can in the can bin
+        pca.channels[0].duty_cycle = int(servo_min[0] / 360 * 655
+    time.sleep(1)
+    # Return the positions of the objects
+        return object_positions
+
+# Define the main function
+def main():
+    # Initialize the Raspberry Pi Camera v2 object
+    camera = PiCamera()
+
+    # Set the resolution of the camera
+    camera.resolution = (640, 480)
+
+    # Set the framerate of the camera
+    camera.framerate = 24
+
+    # Set the ISO of the camera
+    camera.iso = 800
+
+    # Wait for the camera to warm up
+    time.sleep(2)
+
+    # Initialize the servo motors to their initial positions
+    for i in range(6):
+        pca.channels[i].duty_cycle = int(servo_min[i] / 360 * 65535)
+    time.sleep(1)
+
+    # Continuously capture images from the Raspberry Pi Camera v2, process them using the process_image function,
+    # and control the servo motors based on the positions of the objects
+    while True:
+        # Capture an image from the camera
+        image = capture_image(camera)
+
+        # Process the image to detect the objects and control the servo motors
+        object_positions = process_image(image)
+
+        # Print the positions of the objects
+        print(object_positions)
+
+"""
