@@ -139,5 +139,5 @@ def main():
     cv2.destroyAllWindows()
     GPIO.cleanup()
 
-if name == 'main':
+if __name__ == '__main__':
     main()
