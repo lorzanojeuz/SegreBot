@@ -88,6 +88,9 @@ def main():
     # Initialize the timer
     last_detection_time = time.time()
 
+    # Initialize the previous frame
+    _, prev_frame = camera.read()
+
     # Loop through the images from the camera
     while True:
         # Check if the infrared sensor is still active
@@ -106,31 +109,75 @@ def main():
         # Read an image from the camera
         _, image = camera.read()
 
-        # Process the image to detect the objects
-        processed_image = process_image(image)
+        # Process the image to detect moving objects
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (21, 21), 0)
+
+        # Check if the previous frame is available
+        if prev_frame is not None:
+            # Compute the absolute difference between the current and previous frames
+            frame_delta = cv2.absdiff(prev_frame, gray)
+            thresh = cv2.threshold(frame_delta, 25, 255, cv2.THRESH_BINARY)[1]
+
+            # Dilate the thresholded image to fill in holes
+            thresh = cv2.dilate(thresh, None, iterations=2)
+
+            # Find contours in the thresholded image
+            contours, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            # Iterate through the contours and draw a bounding box around each moving object
+            for contour in contours:
+                if cv2.contourArea(contour) < 5000:  # Set a minimum size threshold to filter out small objects
+                    continue
+                x, y, w, h = cv2.boundingRect(contour)
+                cv2.rectangle(image, (x, y), (x+w, y+h), (0, 255, 0), 2)
+
+        # Update the previous frame
+        prev_frame = gray
 
         # Display the processed image
-        cv2.imshow('Processed Image', processed_image)
+        cv2.imshow('Processed Image', image)
 
-        # Find the position of the object in the image
-        x, y, _, _ = cv2.boundingRect(cv2.findContours(cv2.Canny(cv2.GaussianBlur(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), (5, 5), 0), 50, 150), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0])
+        # Find the center of the moving object in the image
+        object_center = None
+        if len(contours) > 0:
+            # Find the contour with the largest area
+            largest_contour = max(contours, key=cv2.contourArea)
+            if cv2.contourArea(largest_contour) >= 5000:  # Set a minimum size threshold to filter out small objects
+                # Compute the center of the contour
+                M = cv2.moments(largest_contour)
+                if M["m00"] != 0:
+                    cx = int(M["m10"] / M["m00"])
+                    cy = int(M["m01"] / M["m00"])
+                    object_center = (cx, cy)
+        # Adjust the position of the servo motors based on the location of the object
+        if object_center is not None:
+            x, y = object_center
+            # Calculate the error between the current position of the object and the center of the image
+            error_x = x - 320
+            error_y = y - 240
 
-        # Map the position of the object to the servo motor angles
-        angle1, angle2, angle3, angle4, angle5, angle6 = map_position_to_angles(x, y)
+            # Calculate the PWM values to adjust the servo motors
+            pwm_values = []
+            for i in range(6):
+                if i % 2 == 0:  # Servos 0, 2, 4 control the pan angle
+                    pwm_values.append(initial_position[i] + error_x)
+                else:  # Servos 1, 3, 5 control the tilt angle
+                    pwm_values.append(initial_position[i] + error_y)
 
-        # Set the angles of the servo motors
-        pwm.set_pwm(0, 0, int(angle1))
-        pwm.set_pwm(1, 0, int(angle2))
-        pwm.set_pwm(2, 0, int(angle3))
-        pwm.set_pwm(3, 0, int(angle4))
-        pwm.set_pwm(4, 0, int(angle5))
-        pwm.set_pwm(5, 0, int(angle6))
+            # Set the PWM values for the servo motors
+            for i in range(6):
+                pwm.set_pwm(i, 0, pwm_values[i])
 
         # Wait for a key press to exit the program
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-    # Release the camera and close all windows
+    # Clean up the resources
     camera.release()
     cv2.destroyAllWindows()
+    pwm.software_reset()
 
+# Call the main function
+if name == 'main':
+    main()
