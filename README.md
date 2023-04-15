@@ -3,12 +3,14 @@
 ### Description for the Main Code
 
 
-### Description for the Conveyor Code
-This code assumes that you have connected the **infrared sensor** to GPIO 4 and the **DC motor** to GPIO 17 and GPIO 27 using an **H-bridge motor driver**.<br> 
+The code provided is a good start, but it will need some modifications to achieve the objective you described.
 
+First, the process_image function detects the edges and draws bounding boxes around them but doesn't identify moving objects. To identify moving objects, you will need to compare the current frame to the previous frame and detect the differences using background subtraction or frame differencing techniques.
 
-In this code, we first import the required libraries and set up the GPIO pins for the infrared sensor and DC motor. Then, we define two functions, clockwise() and counterclockwise(), that control the direction of the motor.
+Second, the map_position_to_angles function maps the position of the object to the servo motor angles, but it doesn't take into account the location of the object relative to the arm. To move the arm to the left or right depending on the location of the object, you will need to compare the x-coordinate of the object to the center of the image and adjust the angles of the appropriate servo motors accordingly.
 
-In the main loop, we continuously read the value of the infrared sensor using GPIO.input(4). If the sensor detects something, we call the clockwise() function to rotate the motor clockwise. If the sensor does not detect anything, we call the counterclockwise() function to rotate the motor counterclockwise. We then wait for a short time using time.sleep(0.1) to avoid excessive loop frequency.
+Third, the code doesn't include any logic to pick up and place the object. You will need to add code to control the gripper servo motor and the movements of the arm to pick up and place the object in the desired location.
 
-Finally, we clean up the GPIO pins using GPIO.cleanup() to ensure that they are returned to their default state when the program exits.
+Finally, the code waits for the infrared sensor to detect something before starting the object detection and tracking process. This may not be the most efficient way to start the process as it requires a physical trigger. Instead, you may want to consider starting the process automatically when the program is run and have it continuously detect and track objects until a specified condition is met.
+
+In summary, the code provided is a good starting point, but it will need modifications and additional logic to achieve the objective you described.
